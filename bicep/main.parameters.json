@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "on_prem_ip_ranges": {
+      "value": [
+        {
+          "value": "110.0.0.0/8"
+        }
+      ]
+    }
+  }
+}

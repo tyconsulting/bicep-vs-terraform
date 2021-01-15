@@ -1,0 +1,70 @@
+name: $(BuildDefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches:
+    include:
+    - master
+  paths:
+    exclude:
+    - 'README.md'
+    - 'tests/*'
+    include:
+      - 'bicep-vs-tf/bicep/*'
+stages:
+- stage: build
+  displayName: 'Build'
+  jobs:
+  - job: bicep_build_deploy
+    displayName: Bicep Build and Deploy
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - script: |
+        curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+        chmod +x ./bicep
+        sudo mv ./bicep /usr/local/bin/bicep
+        bicep --help
+      displayName: 'Install Azure Bicep CLI'
+    - script: |
+        bicep build bicep-vs-tf/bicep/main.bicep
+      displayName: 'Build ARM template'
+    - pwsh: |
+        $rand = New-Object System.Random
+        $vmpw = ""
+        $sqlpw = ""
+        0..12 | ForEach-Object {$vmpw += [char]$rand.Next(33,126)}
+        0..12 | ForEach-Object {$sqlpw += [char]$rand.Next(33,126)}
+        Write-Output ("##vso[task.setvariable variable=vmpw]$vmpw")
+        Write-Output ("##vso[task.setvariable variable=sqlpw]$sqlpw")
+      displayName: Generate Passwords
+      name: firstStep
+      workingDirectory: $(build.sourcesDirectory)
+      failOnStderr: true
+      env:
+        name: Microsoft
+    - task: AzurePowerShell@5
+      displayName: 'Get current user id'
+      inputs:
+        azureSubscription: 'sub-workload-lab'
+        ScriptType: InlineScript
+        Inline: |
+          $appId = (get-azcontext).account.id
+          $objId = (get-azadserviceprincipal -applicationId $appId).Id
+          Write-Output ("##vso[task.setvariable variable=aadObjId]$objId")
+        azurePowerShellVersion: LatestVersion
+    - task: AzureCLI@2
+      displayName: 'Get Deployment What-If Result'
+      inputs:
+        azureSubscription: 'sub-workload-lab'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az deployment sub what-if --location 'australiaeast' --template-file 'bicep-vs-tf/bicep/main.json' -p vm_admin_password='$(vmpw)' sql_admin_password='$(sqlpw)' aad_object_id='$(aadObjId)' @'bicep-vs-tf/bicep/main.parameters.json'
+    - task: AzureCLI@2
+      displayName: 'Deploy ARM template'
+      inputs:
+        azureSubscription: 'sub-workload-lab'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az deployment sub create --location 'australiaeast' --template-file 'bicep-vs-tf/bicep/main.json' -p vm_admin_password='$(vmpw)' sql_admin_password='$(sqlpw)' aad_object_id='$(aadObjId)' @'bicep-vs-tf/bicep/main.parameters.json'
+          
